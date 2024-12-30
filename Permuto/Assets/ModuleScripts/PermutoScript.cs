@@ -3,13 +3,14 @@ using System.Collections.Generic;
 using System.Text.RegularExpressions;
 using System.Linq;
 using UnityEngine;
+using System;
 
 public class PermutoScript : MonoBehaviour {
 
 	// Variables
 	[Header("Stuff")]
 	public KMBombInfo bomb;
-	public KMAudio audio;
+	public KMAudio Audio;
 
 	[Header("Objects")]
 	public KMSelectable nextButton;
@@ -77,7 +78,7 @@ public class PermutoScript : MonoBehaviour {
 			}
 		}
 		buttons[index].AddInteractionPunch(0.75f);
-		audio.PlayGameSoundAtTransform(clickSound,buttons[index].transform);
+		Audio.PlayGameSoundAtTransform(clickSound,buttons[index].transform);
 	}
 
 	// Rendering the stages
@@ -113,7 +114,7 @@ public class PermutoScript : MonoBehaviour {
 		RenderStage1(currentQuery);
 
 		nextButton.AddInteractionPunch(0.75f);
-		audio.PlayGameSoundAtTransform(clickSound,nextButton.transform);
+		Audio.PlayGameSoundAtTransform(clickSound,nextButton.transform);
 	}
 
 	void PressSubmitButton(){
@@ -145,7 +146,7 @@ public class PermutoScript : MonoBehaviour {
 		}
 
 		submitButton.AddInteractionPunch(0.75f);
-		audio.PlayGameSoundAtTransform(clickSound,submitButton.transform);
+		Audio.PlayGameSoundAtTransform(clickSound,submitButton.transform);
 	}
 
 	// Initialization stuff
@@ -184,55 +185,128 @@ public class PermutoScript : MonoBehaviour {
 	
 	// Twitch plays
 	#pragma warning disable 414
-	private readonly string TwitchHelpMessage = @"Use !next to press the NEXT button, use !ready or !submit to press the submit button, and use !swap X Y to swap the colors at indices X and Y (starting with 1). If you have multiple pairs you may do !swap X Y Y Z etc.";
+	private readonly string TwitchHelpMessage = @"Use !{0} next to press the NEXT button, use !{0} ready or !{0} submit to press the submit button, and use !{0} swap X Y to swap the colors at indices X and Y (starting with 1). If you have multiple pairs you may do !{0} swap X Y Y Z etc.";
 	#pragma warning restore 414
 
 	
-	IEnumerator ProcessTwitchCommand(string command){
-		command = command.ToLowerInvariant();
-		Debug.LogFormat("[Permuto #{0}] Ran Twitch command: {1}",moduleId.ToString(),command);
+	IEnumerator ProcessTwitchCommand(string command) {
+        // Implemented by Quinn Wuest
 
-		var match = Regex.Match(command, @"^\s*(?:next)\s*", RegexOptions.IgnoreCase);
-		if (match.Success){ // next button
-			PressNextButton();
+        // The help message should include the mod ID in its command. This is used by typing {0}. That way, the help command will have "!1 submit" instead of "!submit".
+
+		// I removed the logging message that logs what the TP command sent to chat was. Twitch Plays does this already.
+
+        // To each of the Regexes, I added "RegexOptions.CultureInvariant", which ensures that unicode letters in different language sets don't interfere with the code.
+        // For example, in english, we have lowercase i and capital I.
+        // In Turkish, there is lowercase i and capital İ, as well as lowercase ı and capital I.
+        // This addition makes sure this distinction isn't a problem.
+
+        // Also to each of the Regexes, I added (press\s+)? before the command. This allows an optional "press" to be put at the start of the command.
+
+        // I changed the call of "Press<whatever>Button" to "<button>.OnInteract".
+        // That way, the behavior executed by TP is identical to what happens on a real bomb. Doing this allows audio sounds to play or interaction punches to trigger.
+
+        // A "yield return null" before a button press sends a signal to the TP handler that the command is valid. Not including it causes issues.
+        // "yield return null" should NOT be present if the given command is invalid. This avoids the TP handler focusing on the module for a command that would otherwise be invalid.
+        // "yield return sendtochaterror" may be used to send an error message to Twitch Chat clarifying what may be wrong about input.
+        // "yield break" stops the TP handler immediately. This may be used for an invalid command or for any other reasons proposed by the module.
+
+        command = command.ToLowerInvariant();
+
+        var match = Regex.Match(command, @"^\s*(press\s+)?next\s*$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+		if (match.Success) {
+			yield return null;
+			nextButton.OnInteract();
+			yield break;
 		}
 
-		match = Regex.Match(command, @"^\s*(?:ready)\s*", RegexOptions.IgnoreCase);
-		if (match.Success && stage == 1){
-			PressSubmitButton();
-		}
-
-		match = Regex.Match(command, @"^\s*(?:submit)\s*", RegexOptions.IgnoreCase);
-		if (match.Success && stage == 2){
-			PressSubmitButton();
-		}
-
-		match = Regex.Match(command, @"^\s*(?:swap)\s*", RegexOptions.IgnoreCase);
-		if (match.Success && stage == 2){
-			command = command.Replace(" ","");
-			command = command.Replace("swap", "");
-
-			// swap pairs
-			string[] splitString = command.Select(c => c.ToString()).ToArray();
-			if (splitString.Length > 1){
-				for (int i=0; i<splitString.Length; i+=2){ // for each pair
-					int firstInd;
-					int secondInd;
-					bool firstIsNumber = int.TryParse(splitString[i], out firstInd);
-					bool secondIsNumber = int.TryParse(splitString[i+1], out secondInd);
-					if(firstIsNumber && secondIsNumber){
-						bool firstWithinRange = firstInd>=1 && firstInd<=currentPermutation.Count;
-						bool secondWithinRange = firstInd>=1 && firstInd<=currentPermutation.Count;
-						if (firstWithinRange && secondWithinRange){
-							Swap(firstInd-1, secondInd-1);
-							yield return new WaitForSeconds(0.05f);
-						}
-					}
-				}
+		match = Regex.Match(command, @"^\s*(press\s+)?ready\s*$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+		if (match.Success) {
+			if (stage != 1)
+			{
+				yield return "sendtochaterror The READY button cannot be pressed yet. Command ignored.";
+				yield break;
 			}
+			yield return null;
+			submitButton.OnInteract();
+			yield break;
 		}
 
-		yield return null;
-	}	
+		match = Regex.Match(command, @"^\s*(press\s+)?submit\s*$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+		if (match.Success) {
+            if (stage != 2)
+            {
+                yield return "sendtochaterror The SUBMIT button cannot be pressed yet. Command ignored.";
+                yield break;
+            }
+            yield return null;
+            submitButton.OnInteract();
+            yield break;
+        }
 
+		match = Regex.Match(command, @"^\s*swap\s+(?<nums>[12345,; ]+)\s*$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+		// A bit complicated here.
+		// What this Regex does is adds a group labeled "nums" that can contain any of the characters: "12345,; ".
+		// The + indicates that any number of these characters are valid.
+		if (match.Success)
+		{
+			if (stage != 2)
+			{
+				yield return "sendtochaterror You may not swap tiles yet. Command ignored.";
+				yield break;
+			}
+			var nums = match.Groups["nums"].Value;
+			// This line fetches the "nums" group and converts it to a string to iterate over.
+			var list = new List<int>();
+			// Prepare a list which will be added to executed at the end.
+			for (int i = 0; i < nums.Length; i++)
+			{
+				int ix = "12345,; ".IndexOf(nums[i]);
+				if (ix > 4) // If the index of the character is greater than 4 (alternatively, equal to ",", ";", or " ")...
+					continue; // ..ignore it, and go to the next iteration.
+				list.Add(ix); // Add the index to the list.
+			}
+			if (list.Count % 2 != 0) // Count the number of items in the list. If it's odd, ignore the command, since swaps always require two presses.
+			{
+				yield return "sendtochaterror Even number of swaps detected. Command ignored.";
+				yield break;
+			}
+			yield return null; // Now that the command is valid, add a "yield return null" and execute the command.
+			for (int i = 0; i < list.Count; i++)
+			{
+				buttons[list[i]].OnInteract();
+				yield return new WaitForSeconds(0.1f);
+			}
+        }
+	}
+	
+	// Autosolver.
+	private IEnumerator TwitchHandleForcedSolve()
+	{
+		// If we are in the first stage, go to the second stage.
+		if (stage == 1)
+		{
+			submitButton.OnInteract();
+			yield return new WaitForSeconds(0.1f);
+		}
+		
+		// Go through all five buttons.
+		for (int i = 0; i < 5; i++)
+		{
+			// If the color is already in the correct position, ignore it.
+			if (currentPermutation[i] == correctState[i])
+				continue;
+
+			// Press the button at the current position.
+			buttons[i].OnInteract();
+			yield return new WaitForSeconds(0.1f);
+
+			// Find and press the button that belongs in this position.
+			buttons[currentPermutation.IndexOf(correctState[i])].OnInteract();
+			yield return new WaitForSeconds(0.1f);
+		}
+		// Submit the solution.
+		submitButton.OnInteract();
+		yield break;
+	}
 }
